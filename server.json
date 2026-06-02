@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pipeworx-io/openfema",
+  "title": "Openfema",
+  "description": "OpenFEMA MCP — US Federal Emergency Management Agency open data.",
+  "version": "0.1.0",
+  "websiteUrl": "https://pipeworx.io/packs/openfema",
+  "repository": {
+    "url": "https://github.com/pipeworx-io/mcp-openfema",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://gateway.pipeworx.io/openfema/mcp"
+    }
+  ]
+}
