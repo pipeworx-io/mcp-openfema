@@ -1,20 +1,32 @@
 {
   "name": "@pipeworx/mcp-openfema",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenFEMA MCP — US Federal Emergency Management Agency open data.",
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "bin": {
+    "mcp-openfema": "bin/cli.js"
+  },
   "keywords": ["mcp", "mcp-server", "model-context-protocol", "pipeworx", "openfema"],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pipeworx-io/mcp-openfema"
+    "url": "git+https://github.com/pipeworx-io/mcp-openfema.git"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "tsx": "^4.19.0"
+  },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "typescript": "^5.9.3",
+    "@cloudflare/workers-types": "^4.20260405.1"
+  },
+  "pipeworx": {
+    "sourceHash": "v1-6eb4977bfd072f84bc99186857119b277875895ee15ea11294997d42f17efbdc",
+    "sourceCommit": "adb69d997f82a62e8e22b594488c7d04a227db35"
   }
 }
