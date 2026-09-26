@@ -1,6 +1,6 @@
 {
   "name": "@pipeworx/mcp-openfema",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "OpenFEMA MCP — US Federal Emergency Management Agency open data.",
   "type": "module",
   "main": "src/index.ts",
@@ -26,7 +26,7 @@
     "@cloudflare/workers-types": "^4.20260405.1"
   },
   "pipeworx": {
-    "sourceHash": "v1-6eb4977bfd072f84bc99186857119b277875895ee15ea11294997d42f17efbdc",
-    "sourceCommit": "adb69d997f82a62e8e22b594488c7d04a227db35"
+    "sourceHash": "v1-51b0a752f89824ad74fa348da86799925d2630e5d0b6a1c002955a6d52a426ba",
+    "sourceCommit": "97740c6ee04c8acbfe7dddcacfde9e88ff2b9ca0"
   }
 }
