@@ -742,7 +742,7 @@ const tools: McpToolExport['tools'] = [
   {
     name: 'disaster_declarations',
     description:
-      "Look up and COUNT US federal disaster declarations (FEMA DisasterDeclarationsSummaries). Filters: state (2-letter), incidentType (e.g. 'Fire', 'Flood', 'Hurricane', 'Severe Storm'), declarationType ('DR' major disaster, 'EM' emergency, 'FM' fire management), year (fyDeclared, the federal FISCAL year), and since/until for a real calendar date range — use since/until for questions like 'in the past year', which a fiscal year does not answer. Counts are DISTINCT DISASTERS by default, not table rows: FEMA publishes one row per disaster per designated county, so Hurricane Harvey is ~60 rows for Texas but one declaration. Pass designatedArea or grain:'area' for county-level rows. Returns the most recent first.",
+      "Look up and COUNT US federal disaster declarations (FEMA DisasterDeclarationsSummaries). Filters: state (2-letter), incidentType (e.g. 'Fire', 'Flood', 'Hurricane', 'Severe Storm'), declarationType ('DR' major disaster, 'EM' emergency, 'FM' fire management), year (fyDeclared, the federal FISCAL year), and since/until for a real calendar date range — use since/until for questions like 'in the past year', which a fiscal year does not answer. Counts are DISTINCT DISASTERS by default, not table rows: FEMA publishes one row per disaster per designated county, so Hurricane Harvey is ~60 rows for Texas but one declaration. Pass designatedArea or grain:'area' for county-level rows. Returns the most recent first. The response echoes `filters_applied` plus a `note`: declarationType/incidentType/state/designatedArea each narrow the total to a SUBSET (e.g. declarationType:'DR' excludes 'EM' and 'FM') — for an across-all-types/all-states total, call again WITHOUT that filter rather than treating one filtered call's total as the grand total; for a true breakdown, call once per value and sum the totals yourself.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -804,23 +804,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
         const fresh = await mirrorFreshness(cfg);
         if (fresh) return declarationsFromMirror(cfg, args, fresh);
       }
-      const clauses: string[] = [];
-      const state = args.state as string | undefined;
-      const incidentType = args.incidentType as string | undefined;
-      const declarationType = args.declarationType as string | undefined;
-      const year = args.year;
-      if (state?.trim()) clauses.push(`state eq '${odataEscape(state.trim().toUpperCase())}'`);
-      if (typeof year === 'number') clauses.push(`fyDeclared eq ${Math.trunc(year)}`);
-      if (incidentType?.trim()) clauses.push(`incidentType eq '${odataEscape(incidentType.trim())}'`);
-      if (declarationType?.trim()) clauses.push(`declarationType eq '${odataEscape(declarationType.trim().toUpperCase())}'`);
-
-      const params: Record<string, string> = {
-        $top: String(clampLimit(args.limit)),
-        $orderby: (args.orderby as string | undefined)?.trim() || 'declarationDate desc',
-        $inlinecount: 'allpages',
-      };
-      if (clauses.length) params.$filter = clauses.join(' and ');
-      return femaQuery('DisasterDeclarationsSummaries', 'v2', params);
+      return declarationsFromLiveApi(args);
     }
     case 'query_dataset': {
       const entity = reqStr(args, 'entity', '"DisasterDeclarationsSummaries"').trim();
@@ -986,6 +970,57 @@ function isoDate(v: unknown): string | null {
   return s.slice(0, 10);
 }
 
+/**
+ * Normalized filter inputs shared by the mirror path and the live-API
+ * fallback, so both report the SAME filters_applied/note shape regardless of
+ * which one answered the call (fleet #3147 — the two paths used to return
+ * completely different shapes, and the live path silently dropped since/until
+ * entirely, so a caller using it got a total for an UNFILTERED query while
+ * believing it was date-scoped).
+ */
+interface DeclFilters {
+  state?: string;
+  year?: number;
+  incidentType?: string;
+  declarationType?: string;
+  since?: string | null;
+  until?: string | null;
+  area?: string;
+}
+
+function buildFiltersApplied(f: DeclFilters): Record<string, string | number> {
+  const out: Record<string, string | number> = {};
+  if (f.state) out.state = f.state.toUpperCase();
+  if (typeof f.year === 'number') out.fyDeclared = Math.trunc(f.year);
+  if (f.incidentType) out.incidentType = f.incidentType;
+  if (f.declarationType) out.declarationType = f.declarationType.toUpperCase();
+  if (f.since) out.since = f.since;
+  if (f.until) out.until = f.until;
+  if (f.area) out.designatedArea = f.area;
+  return out;
+}
+
+/**
+ * The actual defect this exists to prevent: a benchmark run asked for a
+ * DR/EM/FM breakdown, the router called this tool once with
+ * declarationType:'DR', got back total_disasters:57 (the real DR-only count,
+ * NOT a page-size artifact), and the answering model reported 57 as "FEMA has
+ * issued ... so far" — silently dropping EM (27) and FM (63), whose sum with
+ * DR is the true 147. The tool's own total was always correct for what it was
+ * asked; the fix is to make the response say, in-band, exactly what it
+ * counted, so a type/state/area filter can no longer be mistaken for the
+ * unfiltered grand total.
+ */
+function filtersNote(filters: Record<string, unknown>, grainNoun: string): string {
+  const keys = Object.keys(filters);
+  if (!keys.length) return `This total counts ALL ${grainNoun} in the dataset — no filters were applied.`;
+  const narrows = ['declarationType', 'incidentType', 'state', 'designatedArea'].some((k) => k in filters);
+  const base = `This total counts only ${grainNoun} matching EVERY filter in filters_applied above.`;
+  return narrows
+    ? `${base} declarationType/incidentType/state/designatedArea each narrow to a SUBSET — e.g. declarationType:'DR' excludes 'EM' and 'FM'. For the across-all total, call again WITHOUT that filter; for a breakdown, call once per value and sum.`
+    : base;
+}
+
 async function declarationsFromMirror(
   cfg: MirrorCfg,
   args: Record<string, unknown>,
@@ -1001,11 +1036,12 @@ async function declarationsFromMirror(
   const state = (args.state as string | undefined)?.trim();
   const incidentType = (args.incidentType as string | undefined)?.trim();
   const declarationType = (args.declarationType as string | undefined)?.trim();
+  const year = typeof args.year === 'number' ? args.year : undefined;
   const since = isoDate(args.since);
   const until = isoDate(args.until);
 
   if (state) f.push(`state=eq.${encodeURIComponent(state.toUpperCase())}`);
-  if (typeof args.year === 'number') f.push(`fy_declared=eq.${Math.trunc(args.year)}`);
+  if (typeof year === 'number') f.push(`fy_declared=eq.${Math.trunc(year)}`);
   if (incidentType) f.push(`incident_type=eq.${encodeURIComponent(incidentType)}`);
   if (declarationType) f.push(`declaration_type=eq.${encodeURIComponent(declarationType.toUpperCase())}`);
   if (since) f.push(`declaration_date=gte.${since}`);
@@ -1016,13 +1052,21 @@ async function declarationsFromMirror(
   f.push(`limit=${clampLimit(args.limit)}`);
 
   const { rows, total } = await pgWithCount<Record<string, unknown>>(cfg, rel, f.join('&'));
+  const filtersApplied = buildFiltersApplied({ state, year, incidentType, declarationType, since, until, area });
+  const grainNoun = areaGrain ? 'designated areas (county rows)' : 'disasters (one per declaration per state)';
 
   return {
     // The count is the answer to "how many", so lead with it and say what it
     // counts. Naming it `total_disasters` vs `total_designated_areas` is the
     // whole point: the same filters give 730 and 4,086 on the same data.
+    // It is ALWAYS the exact PostgREST count=exact total for this filtered
+    // query, never rows.length / the page size — truncation is reported
+    // separately via `truncated` below, not folded into the total.
     [areaGrain ? 'total_designated_areas' : 'total_disasters']: total,
     grain: areaGrain ? 'designated area (one row per county)' : 'disaster (one row per declaration per state)',
+    filters_applied: filtersApplied,
+    truncated: total !== null ? rows.length < total : null,
+    note: filtersNote(filtersApplied, grainNoun),
     returned: rows.length,
     records: rows,
     source: 'FEMA OpenFEMA DisasterDeclarationsSummaries',
@@ -1031,6 +1075,66 @@ async function declarationsFromMirror(
       rows_in_mirror: fresh.row_count,
       note: 'Freshness is the load time above, not the moment you called.',
     },
+  };
+}
+
+/**
+ * Live-API fallback (mirror unreachable / not yet loaded — local dev, or the
+ * pre-first-cron window). Mirrors declarationsFromMirror's response shape so
+ * callers get the SAME fields regardless of which path answered, and — the
+ * actual bug fixed here — actually applies since/until as an OData filter.
+ * Previously this branch silently dropped since/until entirely: a caller
+ * asking for a calendar-year window got $inlinecount=allpages over the
+ * UNFILTERED (or only state/year/type-filtered) dataset while believing the
+ * total was date-scoped. The total itself still comes from OpenFEMA's own
+ * $inlinecount=allpages count, never from records.length/$top — that part
+ * was already correct; the missing filter made it an exact count of the
+ * WRONG set.
+ */
+async function declarationsFromLiveApi(args: Record<string, unknown>): Promise<unknown> {
+  const area = (args.designatedArea as string | undefined)?.trim();
+  const areaGrain = args.grain === 'area' || !!area;
+  const clauses: string[] = [];
+  const state = (args.state as string | undefined)?.trim();
+  const incidentType = (args.incidentType as string | undefined)?.trim();
+  const declarationType = (args.declarationType as string | undefined)?.trim();
+  const year = typeof args.year === 'number' ? args.year : undefined;
+  const since = isoDate(args.since);
+  const until = isoDate(args.until);
+
+  if (state) clauses.push(`state eq '${odataEscape(state.toUpperCase())}'`);
+  if (typeof year === 'number') clauses.push(`fyDeclared eq ${Math.trunc(year)}`);
+  if (incidentType) clauses.push(`incidentType eq '${odataEscape(incidentType)}'`);
+  if (declarationType) clauses.push(`declarationType eq '${odataEscape(declarationType.toUpperCase())}'`);
+  if (since) clauses.push(`declarationDate ge '${since}'`);
+  if (until) clauses.push(`declarationDate le '${until}T23:59:59Z'`);
+  if (area) clauses.push(`designatedArea eq '${odataEscape(area)}'`);
+
+  const params: Record<string, string> = {
+    $top: String(clampLimit(args.limit)),
+    $orderby: (args.orderby as string | undefined)?.trim() || 'declarationDate desc',
+    $inlinecount: 'allpages',
+  };
+  if (clauses.length) params.$filter = clauses.join(' and ');
+
+  const { metadata, records } = (await femaQuery('DisasterDeclarationsSummaries', 'v2', params)) as {
+    metadata?: { count?: number | string };
+    records: Record<string, unknown>[];
+  };
+  const totalRaw = Number(metadata?.count);
+  const total = Number.isFinite(totalRaw) ? totalRaw : null;
+  const filtersApplied = buildFiltersApplied({ state, year, incidentType, declarationType, since, until, area });
+  const grainNoun = areaGrain ? 'designated areas (county rows)' : 'disasters (one per declaration per state)';
+
+  return {
+    [areaGrain ? 'total_designated_areas' : 'total_disasters']: total,
+    grain: areaGrain ? 'designated area (one row per county)' : 'disaster (one row per declaration per state)',
+    filters_applied: filtersApplied,
+    truncated: total !== null ? records.length < total : null,
+    note: filtersNote(filtersApplied, grainNoun),
+    returned: records.length,
+    records,
+    source: 'FEMA OpenFEMA DisasterDeclarationsSummaries',
   };
 }
 

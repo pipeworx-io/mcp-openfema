@@ -2,13 +2,13 @@
 
 OpenFEMA MCP — US Federal Emergency Management Agency open data.
 
-Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1683+ live data sources.
+Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1815+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `disaster_declarations` | Look up and COUNT US federal disaster declarations (FEMA DisasterDeclarationsSummaries). Filters: state (2-letter), incidentType (e.g. 'Fire', 'Flood', 'Hurricane', 'Severe Storm'), declarationType ('DR' major disaster, 'EM' emergency, 'FM' fire management), year (fyDeclared, the federal FISCAL year), and since/until for a real calendar date range — use since/until for questions like 'in the past year', which a fiscal year does not answer. Counts are DISTINCT DISASTERS by default, not table rows: FEMA publishes one row per disaster per designated county, so Hurricane Harvey is ~60 rows for Texas but one declaration. Pass designatedArea or grain:'area' for county-level rows. Returns the most recent first. |
+| `disaster_declarations` | Look up and COUNT US federal disaster declarations (FEMA DisasterDeclarationsSummaries). Filters: state (2-letter), incidentType (e.g. 'Fire', 'Flood', 'Hurricane', 'Severe Storm'), declarationType ('DR' major disaster, 'EM' emergency, 'FM' fire management), year (fyDeclared, the federal FISCAL year), and since/until for a real calendar date range — use since/until for questions like 'in the past year', which a fiscal year does not answer. Counts are DISTINCT DISASTERS by default, not table rows: FEMA publishes one row per disaster per designated county, so Hurricane Harvey is ~60 rows for Texas but one declaration. Pass designatedArea or grain:'area' for county-level rows. Returns the most recent first. The response echoes `filters_applied` plus a `note`: declarationType/incidentType/state/designatedArea each narrow the total to a SUBSET (e.g. declarationType:'DR' excludes 'EM' and 'FM') — for an across-all-types/all-states total, call again WITHOUT that filter rather than treating one filtered call's total as the grand total; for a true breakdown, call once per value and sum the totals yourself. |
 | `query_dataset` | Generic OData query against any OpenFEMA dataset. Specify the entity name (and optionally version; defaults to the verified current version) plus OData params: filter, select, orderby, top, skip. Use list_datasets to see available entities/versions and the filter syntax. Returns { metadata, records }. |
 | `list_datasets` | List the OpenFEMA datasets this pack knows about, with their entity name, current version, and a description. Also documents the OData filter syntax and response shape. Call this first to discover what query_dataset can target. |
 
@@ -56,7 +56,7 @@ directly, instead of just this one's:
 }
 ```
 
-Both URLs reach the same gateway and the same 1683+ data sources. The
+Both URLs reach the same gateway and the same 1815+ data sources. The
 only difference is which pack's tools are listed **directly**; `ask_pipeworx`
 reaches all of them from either one.
 
